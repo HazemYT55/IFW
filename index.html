@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IFW Editor · HZM</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0f1226;color:#eef0fa;font-family:system-ui,Arial,sans-serif;height:100vh;height:100dvh;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;background:#171b38;border-bottom:1px solid #2b3160}
+header h1{font-size:18px;margin:0 8px 0 0;color:#8ecbff}
+button,select{font:inherit;background:#7c5cff;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer}
+select{background:#252a55}
+button.alt{background:#252a55}
+main{flex:1;display:grid;grid-template-columns:1fr 1fr;min-height:0}
+@media(max-width:760px){main{grid-template-columns:1fr;grid-template-rows:1fr 1fr}}
+.pane{display:flex;flex-direction:column;min-height:0}
+.ph{padding:6px 12px;font-size:12px;color:#9aa3d6;background:#12162f}
+textarea{flex:1;width:100%;direction:ltr;text-align:left;background:#0b0e20;color:#d6def0;border:0;padding:12px;font:14px/1.6 ui-monospace,Consolas,monospace;resize:none;outline:none}
+#view{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;overflow:auto;background:#fff;background-image:linear-gradient(45deg,#eee 25%,transparent 25%,transparent 75%,#eee 75%),linear-gradient(45deg,#eee 25%,transparent 25%,transparent 75%,#eee 75%);background-size:20px 20px;background-position:0 0,10px 10px}
+#view{direction:ltr}#view svg{max-width:100%;max-height:100%;height:auto}
+#msg{padding:8px 12px;font-size:13px;min-height:34px;background:#12162f;direction:ltr;text-align:left;color:#ffd34d}
+#msg.ok{color:#7df09a}
+</style></head>
+<body>
+<header>
+ <h1>IFW Editor</h1>
+ <select id="ex" title="أمثلة"></select>
+ <select id="scale" title="حجم PNG/JPG"><option value="1">1x</option><option value="2" selected>2x</option><option value="4">4x</option></select>
+ <button id="svg">تحميل SVG</button>
+ <button id="png">تحميل PNG</button>
+ <button id="jpg">تحميل JPG</button>
+ <button class="alt" id="ifw">حفظ ملف ifw</button>
+</header>
+<main>
+ <div class="pane"><div class="ph">كود IFW (image.ifw)</div><textarea id="src" spellcheck="false"></textarea></div>
+ <div class="pane"><div class="ph">المعاينة</div><div id="view"></div><div id="msg"></div></div>
+</main>
+<script>
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function num(v, d){ var n = parseFloat(v); return isNaN(n) ? d : n; }
+function compileIFW(src, warnings){
+  var items = [];
+  src.split(/\r?\n/).forEach(function(raw){
+    var l = raw.trim(); if(!l || l[0] === '#') return;
+    var m = l.match(/^([a-z]+)\s*:\s*(.*)$/);
+    if(!m){ warnings.push('IFW: could not read line "' + l.slice(0, 40) + '"'); return; }
+    var shape = m[1], rest = m[2], a = {}, mm, t;
+    if((t = rest.match(/"([^"]*)"/))){ a.label = t[1]; rest = rest.replace(t[0], ' '); }
+    if((t = rest.match(/from\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)/))){ a.from = [parseFloat(t[1]), parseFloat(t[2])]; rest = rest.replace(t[0], ' '); }
+    if((t = rest.match(/\bto\(\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\)/))){ a.to = [parseFloat(t[1]), parseFloat(t[2])]; rest = rest.replace(t[0], ' '); }
+    if((t = rest.match(/points\(([^)]*)\)/))){
+      a.points = t[1].trim().split(/\s+/).map(function(p){ var q = p.split(','); return [parseFloat(q[0]), parseFloat(q[1])]; });
+      rest = rest.replace(t[0], ' ');
+    }
+    var re = /\b([a-z]+)\s*[=:]\s*([^\s,]+)/g;
+    while((mm = re.exec(rest))) a[mm[1]] = mm[2];
+    rest = rest.replace(/\b([a-z]+)\s*[=:]\s*([^\s,]+)/g, ' ').replace(/^[\s,]+|[\s,]+$/g, '');
+    var c = esc(a.c || '#333333'), it = null;
+    if(shape === 'circle'){ var r = num(a.r, 50); it = {rel:1, w:2*r, h:2*r, x:a.x, y:a.y, draw:function(x, y){ return '<circle cx="' + (x + r) + '" cy="' + (y + r) + '" r="' + r + '" fill="' + c + '"/>'; }}; }
+    else if(shape === 'square'){ var s = num(a.s, 100); it = {rel:1, w:s, h:s, x:a.x, y:a.y, draw:function(x, y){ return '<rect x="' + x + '" y="' + y + '" width="' + s + '" height="' + s + '" fill="' + c + '"/>'; }}; }
+    else if(shape === 'rect'){ var w = num(a.w, 100), h = num(a.h, 50); it = {rel:1, w:w, h:h, x:a.x, y:a.y, draw:function(x, y){ return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + c + '"/>'; }}; }
+    else if(shape === 'triangle'){ var ts = num(a.s, 80); it = {rel:1, w:ts, h:ts, x:a.x, y:a.y, draw:function(x, y){ return '<polygon points="' + (x + ts / 2) + ',' + y + ' ' + (x + ts) + ',' + (y + ts) + ' ' + x + ',' + (y + ts) + '" fill="' + c + '"/>'; }}; }
+    else if(shape === 'star'){ var R = num(a.s, 50); it = {rel:1, w:2*R, h:2*R, x:a.x, y:a.y, draw:function(x, y){
+      var pts = [], k; for(k = 0; k < 10; k++){ var ang = -Math.PI / 2 + k * Math.PI / 5, rad = k % 2 ? R * 0.4 : R; pts.push((x + R + rad * Math.cos(ang)).toFixed(1) + ',' + (y + R + rad * Math.sin(ang)).toFixed(1)); }
+      return '<polygon points="' + pts.join(' ') + '" fill="' + c + '"/>'; }}; }
+    else if(shape === 'line'){
+      if(!a.from || !a.to){ warnings.push('IFW: line needs from(x,y) and to(x,y)'); return; }
+      var lw = num(a.w, 2);
+      it = {box:[Math.min(a.from[0], a.to[0]), Math.min(a.from[1], a.to[1]), Math.max(a.from[0], a.to[0]), Math.max(a.from[1], a.to[1])],
+        draw:function(){ return '<line x1="' + a.from[0] + '" y1="' + a.from[1] + '" x2="' + a.to[0] + '" y2="' + a.to[1] + '" stroke="' + esc(a.c || '#000000') + '" stroke-width="' + lw + '"/>'; }};
+    }
+    else if(shape === 'polygon'){
+      if(!a.points || a.points.length < 3){ warnings.push('IFW: polygon needs points(x,y x,y x,y)'); return; }
+      var xs = a.points.map(function(p){ return p[0]; }), ys = a.points.map(function(p){ return p[1]; });
+      it = {box:[Math.min.apply(null, xs), Math.min.apply(null, ys), Math.max.apply(null, xs), Math.max.apply(null, ys)],
+        draw:function(){ return '<polygon points="' + a.points.map(function(p){ return p.join(','); }).join(' ') + '" fill="' + c + '"/>'; }};
+    }
+    else if(shape === 'text'){
+      var fs = num(a.size || a.s, 16), tx = num(a.x, 0), ty = num(a.y, fs), label = a.label || '';
+      it = {box:[tx, ty - fs, tx + label.length * fs * 0.6, ty + fs * 0.3],
+        draw:function(){ return '<text x="' + tx + '" y="' + ty + '" fill="' + esc(a.c || '#000000') + '" font-size="' + fs + '" font-family="Arial,Helvetica,sans-serif">' + esc(label) + '</text>'; }};
+    }
+    else if(shape === 'path'){
+      var d = rest.replace(/[^MmLlHhVvCcSsQqTtAaZz0-9.,\s-]/g, '').trim();
+      if(!d){ warnings.push('IFW: path needs path data, for example path: M0,0 L50,50'); return; }
+      var nums = (d.match(/-?\d*\.?\d+/g) || []).map(parseFloat), px = [], py = [], q;
+      for(q = 0; q + 1 < nums.length; q += 2){ px.push(nums[q]); py.push(nums[q + 1]); }
+      it = {box:[Math.min.apply(null, px.concat([0])), Math.min.apply(null, py.concat([0])), Math.max.apply(null, px.concat([1])), Math.max.apply(null, py.concat([1]))],
+        draw:function(){ return '<path d="' + esc(d) + '" fill="none" stroke="' + esc(a.c || '#000000') + '" stroke-width="2"/>'; }};
+    }
+    else { warnings.push('IFW: unknown shape "' + shape + '" · skipped'); return; }
+    items.push(it);
+  });
+  if(!items.length) return null;
+  var xcur = 0, maxH = 0, parts = [], bb = [1e9, 1e9, -1e9, -1e9];
+  function grow(x0, y0, x1, y1){ bb[0] = Math.min(bb[0], x0); bb[1] = Math.min(bb[1], y0); bb[2] = Math.max(bb[2], x1); bb[3] = Math.max(bb[3], y1); }
+  items.forEach(function(it){ if(it.rel && it.y === undefined) maxH = Math.max(maxH, it.h); });
+  items.forEach(function(it){
+    if(it.rel){
+      var x = it.x === undefined ? undefined : num(it.x, 0), y = it.y === undefined ? undefined : num(it.y, 0);
+      if(x === undefined){ x = xcur; xcur += it.w + 10; }
+      if(y === undefined) y = maxH - it.h;
+      parts.push(it.draw(x, y)); grow(x, y, x + it.w, y + it.h);
+    } else { parts.push(it.draw()); grow(it.box[0], it.box[1], it.box[2], it.box[3]); }
+  });
+  var pad = 4, vx = Math.floor(bb[0]) - pad, vy = Math.floor(bb[1]) - pad, vw = Math.ceil(bb[2] - bb[0]) + 2 * pad, vh = Math.ceil(bb[3] - bb[1]) + 2 * pad;
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="' + vx + ' ' + vy + ' ' + vw + ' ' + vh + '" width="' + vw + '" height="' + vh + '" style="max-width:100%;height:auto" data-wltag="ifw">' + parts.join('') + '</svg>';
+}
+
+var EXAMPLES={
+"شعار بسيط":"circle: r=40 c=blue\ntext: \"W\" x=35 y=50 c=white",
+"أشكال":"circle: r=40 c=#ff4d5e\nsquare: s=80 c=#7c5cff\ntriangle: s=80 c=#38e08a\nstar: s=45 c=#ffd34d\nrect: w=120 h=50 c=#00d4ff",
+"ليلة وقمر":"rect: x=0 y=0 w=400 h=260 c=#10123a\ncircle: r=34 x=300 y=30 c=#fff6c9\nstar: s=10 x=40 y=30 c=white\nstar: s=8 x=120 y=60 c=white\nstar: s=12 x=210 y=25 c=white\npolygon: points(0,260 90,130 170,260) c=#2a2058\npolygon: points(120,260 230,100 340,260) c=#1d1844\nrect: x=0 y=230 w=400 h=30 c=#0e0b1f\nline: from(0,230) to(400,230) c=#38e08a w=4\ntext: \"HZM.Dev\" x=130 y=200 c=#8ecbff size=26"
+};
+var src=document.getElementById('src'),view=document.getElementById('view'),msg=document.getElementById('msg'),ex=document.getElementById('ex');
+Object.keys(EXAMPLES).forEach(function(k){var o=document.createElement('option');o.value=k;o.textContent=k;ex.appendChild(o);});
+var svgText=null;
+function render(){
+  var w=[];var s=compileIFW(src.value,w);
+  svgText=s?s.replace(' data-wltag="ifw"',''):null;
+  view.innerHTML=s||'';
+  if(!s){msg.className='';msg.textContent=w.length?w.join(' | '):'Nothing to draw yet';}
+  else if(w.length){msg.className='';msg.textContent=w.join(' | ');}
+  else {msg.className='ok';msg.textContent='OK';}
+  try{localStorage.setItem('ifw-src',src.value);}catch(e){}
+}
+src.addEventListener('input',render);
+ex.addEventListener('change',function(){src.value=EXAMPLES[ex.value].replace(/\\n/g,'\n');render();});
+function save(name,blob){var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){a.remove();URL.revokeObjectURL(a.href);},500);}
+function need(){if(!svgText){msg.className='';msg.textContent='Write some IFW first';return false;}return true;}
+function raster(type,name){
+  if(!need())return;
+  var sc=+document.getElementById('scale').value;
+  var m=svgText.match(/width="(\d+)" height="(\d+)"/);var w=+m[1]*sc,h=+m[2]*sc;
+  var fixed=svgText.replace(/ style="[^"]*"/,'').replace(/width="\d+" height="\d+"/,'width="'+w+'" height="'+h+'"');
+  var img=new Image();
+  img.onload=function(){var c=document.createElement('canvas');c.width=w;c.height=h;var x=c.getContext('2d');
+    if(type==='image/jpeg'){x.fillStyle='#fff';x.fillRect(0,0,w,h);}
+    x.drawImage(img,0,0,w,h);c.toBlob(function(b){save(name,b);msg.className='ok';msg.textContent=name+' ('+w+'x'+h+')';},type,0.95);};
+  img.onerror=function(){msg.className='';msg.textContent='Could not convert';};
+  img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(fixed);
+}
+document.getElementById('svg').onclick=function(){if(need()){save('image.svg',new Blob([svgText+'\n'],{type:'image/svg+xml'}));msg.className='ok';msg.textContent='image.svg';}};
+document.getElementById('png').onclick=function(){raster('image/png','image.png');};
+document.getElementById('jpg').onclick=function(){raster('image/jpeg','image.jpg');};
+document.getElementById('ifw').onclick=function(){save('image.ifw',new Blob([src.value],{type:'text/plain'}));};
+var saved=null;try{saved=localStorage.getItem('ifw-src');}catch(e){}
+src.value=saved||EXAMPLES["ليلة وقمر"].replace(/\\n/g,'\n');
+render();
+window.__t={render:render,get svg(){return svgText}};
+</script></body></html>
