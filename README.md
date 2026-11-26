@@ -6,7 +6,7 @@ The drawing code is the `compileIFW` function from the WebLang IDE (`IDE.html` i
 
 ## Run it
 
-Open `ifw-editor.html` in a desktop browser. No install, no server, no internet needed. It was tested in headless Chrome only. Phones and Safari were not tested.
+Open `index.html` in a desktop browser. No install, no server, no internet needed. It was tested in headless Chrome only. Phones and Safari were not tested.
 
 ## Use it
 
